@@ -18,12 +18,12 @@
 library("shiny")
 library("shinythemes")
 library("leaflet")
-library("maptools")
+#library("maptools")
 library("spatstat") #For the owin command...and for runifpoint
 library("RColorBrewer")
 library("leaflet")
-library("rgdal")
-library("rgeos")
+#library("rgdal")
+#library("rgeos")
 library("proxy")
 library("sf")
 library("raster")
@@ -168,14 +168,14 @@ get.pest.locs<-function(ras, n.poss, shp){
 #  Make the trap locations from a x/y spacing, buffer and shapefile - and if supplied, a masking raster of 0/1
 make.trap.locs<-function(x.space,y.space,buff,shp, ras=NULL){
   
-  b.box<-bbox(shp)
+  b.box<-st_bbox(shp)
   
-  traps.x<-seq(from=b.box[1,1], by=x.space, to=b.box[1,2])
-  traps.y<-seq(from=b.box[2,1], by=y.space, to=b.box[2,2])
+  traps.x<-seq(from=b.box[1], by=x.space, to=b.box[3])
+  traps.y<-seq(from=b.box[2], by=y.space, to=b.box[4])
   
   traps<-as.data.frame((expand.grid(traps.x, traps.y)))
   colnames(traps)<-c("X","Y")
-  shp.buff<-gBuffer(shp,width=-buff)   #Buffer in from the shapefuile edge
+  shp.buff<-st_buffer(shp,dist = -buff)   #Buffer in from the shapefile edge
   #Remove traps that are outside the window,,,
   traps<-traps[inside.owin(traps[,1], traps[,2], shp.buff),]
   if(is.null(ras)){
@@ -535,10 +535,10 @@ server<-function(input, output, session) {
   mydata.shp<-reactive({
     
     #1. The default shape - Mahia Peninsula - defined at the very top
-    shp<-readOGR("Shapefiles",def.shp)
-    proj4string<-crs(shp)
+    shp<-st_read(dsn = file.path("Shapefiles",paste0(def.shp, ".shp")))
+    proj4string<-st_crs(shp)
     if(input$area_type=="MP"){
-      shp<-readOGR("Shapefiles",def.shp)
+      shp<-st_read(dsn = file.path("Shapefiles",paste0(def.shp, ".shp")))
     }
     #2. 'Upload Shapefile, then read in all the components, 
     if(input$area_type=="Map"){
@@ -558,7 +558,7 @@ server<-function(input, output, session) {
         
         
         getshp <- list.files(dir, pattern="*.shp", full.names=TRUE)
-        shp<-readOGR(getshp)
+        shp<-st_read(getshp)
         # shp<-gBuffer(shp, width=1) #Fixes some issues with orphaned holes
       }
     }
@@ -573,9 +573,9 @@ server<-function(input, output, session) {
       shp<-SpatialPolygons(list(Polygons(list(Polygon(a)),ID)), proj4string=CRS(proj4string))
     }
     
-    proj4string<-crs(shp)  #get the proj string from the shapefile itself
-    shp<-gBuffer(shp, width=1) #Can fix some orphaned holes issues
-    ha<-sapply(slot(shp, "polygons"), slot, "area")/10000  
+    proj4string<-st_crs(shp)  #get the proj string from the shapefile itself
+    shp<-st_buffer(shp, dist=1) #Can fix some orphaned holes issues
+    ha<-st_area(shp)/10000 #In hectares  
     return(list(shp=shp, p4s=proj4string, ha=ha))
   })
   
@@ -1418,7 +1418,7 @@ server<-function(input, output, session) {
     shp<-mydata.shp()$shp
     # shp<-mydata.zone()$shp.2
     
-    shp.proj<-spTransform(shp,CRS("+proj=longlat +datum=WGS84"))
+    shp.proj<-st_transform(shp, crs ="+proj=longlat +datum=WGS84")
     # ha<-mydata()$ha
     
     m<-leaflet() %>%
@@ -1440,14 +1440,14 @@ server<-function(input, output, session) {
     animals.xy<-mydata.map()$animals.xy.ini
     proj4string<-mydata.shp()$p4s
     
-    traps.proj<-proj4::project(traps, proj=proj4string, inverse=T) 
-    tmp<-(proj4::project(animals.xy[,1:2], proj=proj4string, inverse=T))
-    animals.xy$Lat<-tmp$y
-    animals.xy$Lon<-tmp$x
+    traps.proj<-st_coordinates(st_as_sf(traps, coords = c("X", "Y"), crs=proj4string))
+    tmp<-st_coordinates(st_as_sf(animals.xy[,1:2], coords = c("X", "Y"), crs=proj4string))
+    animals.xy$Lat<-tmp[, "Y"]
+    animals.xy$Lon<-tmp[, "X"]
     map<-leafletProxy("mymap")
     map%>%clearMarkers()
     
-    map%>%addCircleMarkers(lng=traps.proj$x,lat=traps.proj$y, radius=3, color="black", weight=1, fill=TRUE, fillColor="red", fillOpacity=1, stroke=TRUE, group="Devices")
+    map%>%addCircleMarkers(lng=traps.proj[, "X"],lat=traps.proj[, "Y"], radius=3, color="black", weight=1, fill=TRUE, fillColor="red", fillOpacity=1, stroke=TRUE, group="Devices")
     map%>%addCircleMarkers(lng=animals.xy$Lon,lat=animals.xy$Lat, radius=5, color="black", weight=1, fill=TRUE, fillColor=cols.vec[2], fillOpacity=1, stroke=TRUE, group="Animals")
     
     map%>%addLayersControl(
