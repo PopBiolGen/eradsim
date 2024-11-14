@@ -945,7 +945,7 @@ server<-function(input, output, session) {
           n.animals<-dim(animals.xy)[1]
           animals.xy$Dead<-0
           coordinates(animals.xy) <- ~ X+Y
-          proj4string(animals.xy) <- proj4string(shp)
+          proj4string(animals.xy) <- st_crs(shp)
           
           #Calculate the g0 values...
           #g0 for traps
@@ -1331,7 +1331,7 @@ server<-function(input, output, session) {
                 }
                 
                 coordinates(new.animals.xy) <- ~ X+Y
-                proj4string(new.animals.xy) <- proj4string(shp)
+                proj4string(new.animals.xy) <- st_crs(shp)
                 animals.xy<-rbind(animals.xy,new.animals.xy)
                 
                 n.animals<-dim(animals.xy)[1]
