@@ -1440,8 +1440,8 @@ server<-function(input, output, session) {
     animals.xy<-mydata.map()$animals.xy.ini
     proj4string<-mydata.shp()$p4s
     
-    traps.proj<-st_coordinates(st_as_sf(traps, coords = c("X", "Y"), crs=proj4string))
-    tmp<-st_coordinates(st_as_sf(animals.xy[,1:2], coords = c("X", "Y"), crs=proj4string))
+    traps.proj<-st_coordinates(st_transform(st_as_sf(traps, coords = c("X", "Y"), crs=proj4string), crs = "WGS84")) # back to lat/long
+    tmp<-st_coordinates(st_transform(st_as_sf(animals.xy[,1:2], coords = c("X", "Y"), crs=proj4string), crs = "WGS84"))
     animals.xy$Lat<-tmp[, "Y"]
     animals.xy$Lon<-tmp[, "X"]
     map<-leafletProxy("mymap")
