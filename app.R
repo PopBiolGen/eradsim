@@ -1845,6 +1845,19 @@ server<-function(input, output, session) {
     }
   )
   
+  output$data.out <- downloadHandler(
+    #Name of the report.
+    filename = function() {
+      paste("Results-data-out", Sys.Date(), ".csv", sep="")
+    },
+    content = function(file) {
+      
+      data<-datab()$pop.size.mat
+      data <- cbind(time = 1:ncol(data), t(data))
+      write.csv(data, file)
+    }
+  )
+  
   
   
   
@@ -2394,6 +2407,9 @@ ui<-fluidPage(theme=shinytheme("flatly"),
                                             ),
                                             fluidRow(
                                               downloadButton("report", strong("Generate report"),icon=icon("file-export")) 
+                                            ),
+                                            fluidRow(
+                                              downloadButton("data.out", strong("Output data"),icon=icon("file-export")) 
                                             )
                                    ),
                                    tabPanel(strong("5. Help"),
