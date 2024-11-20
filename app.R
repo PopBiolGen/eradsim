@@ -18,12 +18,12 @@
 library("shiny")
 library("shinythemes")
 library("leaflet")
-library("maptools")
+#library("maptools")
 library("spatstat") #For the owin command...and for runifpoint
 library("RColorBrewer")
 library("leaflet")
-library("rgdal")
-library("rgeos")
+#library("rgdal")
+#library("rgeos")
 library("proxy")
 library("sf")
 library("raster")
@@ -168,14 +168,14 @@ get.pest.locs<-function(ras, n.poss, shp){
 #  Make the trap locations from a x/y spacing, buffer and shapefile - and if supplied, a masking raster of 0/1
 make.trap.locs<-function(x.space,y.space,buff,shp, ras=NULL){
   
-  b.box<-bbox(shp)
+  b.box<-st_bbox(shp)
   
-  traps.x<-seq(from=b.box[1,1], by=x.space, to=b.box[1,2])
-  traps.y<-seq(from=b.box[2,1], by=y.space, to=b.box[2,2])
+  traps.x<-seq(from=b.box[1], by=x.space, to=b.box[3])
+  traps.y<-seq(from=b.box[2], by=y.space, to=b.box[4])
   
   traps<-as.data.frame((expand.grid(traps.x, traps.y)))
   colnames(traps)<-c("X","Y")
-  shp.buff<-gBuffer(shp,width=-buff)   #Buffer in from the shapefuile edge
+  shp.buff<-st_buffer(shp,dist = -buff)   #Buffer in from the shapefile edge
   #Remove traps that are outside the window,,,
   traps<-traps[inside.owin(traps[,1], traps[,2], shp.buff),]
   if(is.null(ras)){
@@ -535,10 +535,10 @@ server<-function(input, output, session) {
   mydata.shp<-reactive({
     
     #1. The default shape - Mahia Peninsula - defined at the very top
-    shp<-readOGR("Shapefiles",def.shp)
-    proj4string<-crs(shp)
+    shp<-st_read(dsn = file.path("Shapefiles",paste0(def.shp, ".shp")))
+    proj4string<-st_crs(shp)
     if(input$area_type=="MP"){
-      shp<-readOGR("Shapefiles",def.shp)
+      shp<-st_read(dsn = file.path("Shapefiles",paste0(def.shp, ".shp")))
     }
     #2. 'Upload Shapefile, then read in all the components, 
     if(input$area_type=="Map"){
@@ -558,7 +558,7 @@ server<-function(input, output, session) {
         
         
         getshp <- list.files(dir, pattern="*.shp", full.names=TRUE)
-        shp<-readOGR(getshp)
+        shp<-st_read(getshp)
         # shp<-gBuffer(shp, width=1) #Fixes some issues with orphaned holes
       }
     }
@@ -573,9 +573,9 @@ server<-function(input, output, session) {
       shp<-SpatialPolygons(list(Polygons(list(Polygon(a)),ID)), proj4string=CRS(proj4string))
     }
     
-    proj4string<-crs(shp)  #get the proj string from the shapefile itself
-    shp<-gBuffer(shp, width=1) #Can fix some orphaned holes issues
-    ha<-sapply(slot(shp, "polygons"), slot, "area")/10000  
+    proj4string<-st_crs(shp)  #get the proj string from the shapefile itself
+    shp<-st_buffer(shp, dist=1) #Can fix some orphaned holes issues
+    ha<-st_area(shp)/10000 #In hectares  
     return(list(shp=shp, p4s=proj4string, ha=ha))
   })
   
@@ -658,6 +658,13 @@ server<-function(input, output, session) {
     # pop.size.zone.mat[[ii]][,t+1]
     
     withProgress(message="Running simulation ",value=0,{
+      # function to take simulated points and extract projected points as a dataframe
+      sim.to.proj <- function(sim.locs){
+        loc.sf <- st_as_sf(sim.locs, coords = c("X", "Y"), crs=proj4string) # throw to sf with flat projection
+        loc.coords <- st_coordinates(loc.sf)
+        as.data.frame(loc.coords)
+      }
+      
       #Go through the scenarios one by one...
       for(kk in 1:n.scen){  #For each scenario...
         incProgress(kk/n.scen, detail = paste("Doing scenario ", kk," of", n.scen))
@@ -745,19 +752,14 @@ server<-function(input, output, session) {
           }else{
             traps.a<-make.trap.locs(x.space.a, y.space.a,buffer.a,shp, ras=raster(trap.mask))            
           }
-          
-          coordinates(traps.a) <- c( "X", "Y" )
-          proj4string(traps.a) <- CRS(proj4string)
-          traps.xy.a<-as.data.frame(traps.a)
+          traps.xy.a<-sim.to.proj(traps.a)
           n.traps.a<-dim(traps.xy.a)[1]
         }
         
         # if(input$show_trap_b==1){
         if(is.na(trap.start.b)==FALSE){
           traps.b<-make.trap.locs(x.space.b, y.space.b, buffer.b,shp)
-          coordinates(traps.b) <- c( "X", "Y" )
-          proj4string(traps.b) <- CRS(proj4string)
-          traps.xy.b<-as.data.frame(traps.b)
+          traps.xy.b<-sim.to.proj(traps.b)
           n.traps.b<-dim(traps.xy.b)[1]
         }
         
@@ -770,9 +772,7 @@ server<-function(input, output, session) {
             # traps.a<-make.trap.locs(x.space.a, y.space.a,buffer.a,shp, ras=raster(trap.mask))            
           }
           
-          coordinates(baits.a) <- c( "X", "Y" )
-          proj4string(baits.a) <- CRS(proj4string)
-          baits.xy.a<-as.data.frame(baits.a)
+          baits.xy.a<-sim.to.proj(baits.a)
           n.baits.a<-dim(baits.xy.a)[1]
         }
         
@@ -944,8 +944,7 @@ server<-function(input, output, session) {
           # colnames(animals.xy)<-c("X","Y")
           n.animals<-dim(animals.xy)[1]
           animals.xy$Dead<-0
-          coordinates(animals.xy) <- ~ X+Y
-          proj4string(animals.xy) <- proj4string(shp)
+          animals.xy <- st_as_sf(animals.xy, coords = c("X", "Y"), crs = st_crs(shp))
           
           #Calculate the g0 values...
           #g0 for traps
@@ -992,8 +991,6 @@ server<-function(input, output, session) {
           #The second is the trap+animal pairwise  - i.e. it works out the probability of capture for each device and animal, by device type.
           if (sim_type=='grid'){
             animals.SP<-animals.xy
-            coordinates(animals.SP) <- c( "X", "Y" )
-            proj4string(animals.SP) <- CRS(proj4string)
             which.grid<-st_within(st_as_sf(animals.SP), shp_grid)
             animals.xy$CellIndex<-as.data.frame(which.grid)$col.id
             animals.xy$PreProb<-(2*pi*animals.xy$g0.a*animals.xy$Sigma^2)/cell.area.m2   #The pre probability...
@@ -1003,7 +1000,7 @@ server<-function(input, output, session) {
             if(is.na(trap.start.a)==FALSE){
               dist2.xy.a<-matrix(NA,n.traps.a,n.animals)
               prob.xy.a<-matrix(0,n.traps.a,n.animals)
-              dist.xy.a<-dist(as.data.frame(traps.xy.a), as.data.frame(animals.xy)[,1:2], method="euclidean") #Distance (not squared) - faster than using outer
+              dist.xy.a<-dist(as.data.frame(traps.xy.a), st_coordinates(animals.xy)[,1:2], method="euclidean") #Distance (not squared) - faster than using outer
               prob.xy.a<-exp(-(dist.xy.a^2)/(2*animals.xy$Sigma^2))*animals.xy$g0.a #Use the g0u for sampling...
               rm(dist.xy.a)
             }
@@ -1011,7 +1008,7 @@ server<-function(input, output, session) {
             if(is.na(trap.start.b)==FALSE){
               dist2.xy.b<-matrix(NA,n.traps.b,n.animals)
               prob.xy.b<-matrix(0,n.traps.b,n.animals)
-              dist.xy.b<-dist(as.data.frame(traps.xy.b), as.data.frame(animals.xy)[,1:2], method="euclidean") #Distance (not squared) - faster than using outer
+              dist.xy.b<-dist(as.data.frame(traps.xy.b), st_coordinates(animals.xy)[,1:2], method="euclidean") #Distance (not squared) - faster than using outer
               prob.xy.b<-exp(-(dist.xy.b^2)/(2*animals.xy$Sigma^2))*animals.xy$g0.b #Use the g0u for sampling...
               rm(dist.xy.b)
             }
@@ -1019,7 +1016,7 @@ server<-function(input, output, session) {
             if(is.na(bait.start.a)==FALSE){
               dist2.xy.c<-matrix(NA,n.baits.a,n.animals)
               prob.xy.c<-matrix(0,n.baits.a,n.animals)
-              dist.xy.c<-dist(as.data.frame(baits.xy.a), as.data.frame(animals.xy)[,1:2], method="euclidean") #Distance (not squared) - faster than using outer
+              dist.xy.c<-dist(as.data.frame(baits.xy.a), st_coordinates(animals.xy)[,1:2], method="euclidean") #Distance (not squared) - faster than using outer
               prob.xy.c<-exp(-(dist.xy.c^2)/(2*animals.xy$Sigma^2))*animals.xy$g0.bait #Use the g0u for sampling...
               rm(dist.xy.c)
             }
@@ -1260,11 +1257,7 @@ server<-function(input, output, session) {
                 
                 # new.animals.xy<-as.data.frame(runifpoint(N.new,shp))
                 colnames(new.animals.xy)<-c("X","Y")
-                new.animals.SP<-new.animals.xy  #Why dis?
-                coordinates(new.animals.SP) <- c( "X", "Y" )
-                proj4string(new.animals.SP) <- CRS(proj4string)
-                # new.animals.xy$g0<-g0.mean
-                # new.animals.xy$Sigma<-sigma.mean
+                new.animals.xy <- st_as_sf(new.animals.xy, coords = c("X", "Y"), crs = st_crs(shp))
                 new.animals.xy$Dead<-0
                 new.animals.xy$g0.a<-rbeta(N.new, alpbet.a$alpha, alpbet.a$beta)
                 new.animals.xy$g0.a[new.animals.xy$g0.a<0]<-0.000001
@@ -1330,8 +1323,6 @@ server<-function(input, output, session) {
                   
                 }
                 
-                coordinates(new.animals.xy) <- ~ X+Y
-                proj4string(new.animals.xy) <- proj4string(shp)
                 animals.xy<-rbind(animals.xy,new.animals.xy)
                 
                 n.animals<-dim(animals.xy)[1]
@@ -1418,7 +1409,7 @@ server<-function(input, output, session) {
     shp<-mydata.shp()$shp
     # shp<-mydata.zone()$shp.2
     
-    shp.proj<-spTransform(shp,CRS("+proj=longlat +datum=WGS84"))
+    shp.proj<-st_transform(shp, crs ="+proj=longlat +datum=WGS84")
     # ha<-mydata()$ha
     
     m<-leaflet() %>%
@@ -1440,14 +1431,14 @@ server<-function(input, output, session) {
     animals.xy<-mydata.map()$animals.xy.ini
     proj4string<-mydata.shp()$p4s
     
-    traps.proj<-proj4::project(traps, proj=proj4string, inverse=T) 
-    tmp<-(proj4::project(animals.xy[,1:2], proj=proj4string, inverse=T))
-    animals.xy$Lat<-tmp$y
-    animals.xy$Lon<-tmp$x
+    traps.proj<-st_coordinates(st_transform(st_as_sf(traps, coords = c("X", "Y"), crs=proj4string), crs = "WGS84")) # back to lat/long
+    tmp<-st_coordinates(st_transform(st_as_sf(animals.xy[,1:2], coords = c("X", "Y"), crs=proj4string), crs = "WGS84"))
+    animals.xy$Lat<-tmp[, "Y"]
+    animals.xy$Lon<-tmp[, "X"]
     map<-leafletProxy("mymap")
     map%>%clearMarkers()
     
-    map%>%addCircleMarkers(lng=traps.proj$x,lat=traps.proj$y, radius=3, color="black", weight=1, fill=TRUE, fillColor="red", fillOpacity=1, stroke=TRUE, group="Devices")
+    map%>%addCircleMarkers(lng=traps.proj[, "X"],lat=traps.proj[, "Y"], radius=3, color="black", weight=1, fill=TRUE, fillColor="red", fillOpacity=1, stroke=TRUE, group="Devices")
     map%>%addCircleMarkers(lng=animals.xy$Lon,lat=animals.xy$Lat, radius=5, color="black", weight=1, fill=TRUE, fillColor=cols.vec[2], fillOpacity=1, stroke=TRUE, group="Animals")
     
     map%>%addLayersControl(
@@ -1850,6 +1841,19 @@ server<-function(input, output, session) {
       
       data<-datab()$params
       
+      write.csv(data, file)
+    }
+  )
+  
+  output$data.out <- downloadHandler(
+    #Name of the report.
+    filename = function() {
+      paste("Results-data-out", Sys.Date(), ".csv", sep="")
+    },
+    content = function(file) {
+      
+      data<-datab()$pop.size.mat
+      data <- cbind(time = 1:ncol(data), t(data))
       write.csv(data, file)
     }
   )
@@ -2403,6 +2407,9 @@ ui<-fluidPage(theme=shinytheme("flatly"),
                                             ),
                                             fluidRow(
                                               downloadButton("report", strong("Generate report"),icon=icon("file-export")) 
+                                            ),
+                                            fluidRow(
+                                              downloadButton("data.out", strong("Output data"),icon=icon("file-export")) 
                                             )
                                    ),
                                    tabPanel(strong("5. Help"),
